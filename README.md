@@ -24,11 +24,13 @@ pip install -r requirements-dev.txt
 
 python -m pytest -q               # 单元测试
 python -m scripts.selfcheck       # 端到端自检
-python -m scripts.seed            # 生成演示订单数据
 python -m uvicorn app.main:app --reload
 ```
 
 打开 <http://127.0.0.1:8000> 就是聊天页面。
+
+> 演示订单数据会在首次启动时自动播种（11 个订单，签收时间按「今天」倒推生成）。
+> 想刷新日期或者重新造数据，跑 `python -m scripts.seed`。
 
 想换成真实模型：把 `.env.example` 复制成 `.env`，改成
 
