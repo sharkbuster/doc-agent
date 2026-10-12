@@ -116,6 +116,103 @@ def sweep_threshold(answerable: list[float], refusable: list[float], signal: str
     return {"signal": signal, "rows": rows, "best": best}
 
 
+# ----------------------------------------------------------------------
+# 拒答判据的不同算法对比
+#
+# 这一段是**实验代码**，刻意没有去复用 Retriever.coverage：生产路径上只需要一种判据，
+# 为了「可替换」把它做成带一堆开关的接口，等于让每个调用点都多背几个用不上的参数。
+# 实验代码重复十来行、换生产接口干净，划算。
+# ----------------------------------------------------------------------
+
+SIGNAL_VARIANTS = [
+    ("bigram", (2,), True, 3),
+    ("bigram", (2,), True, 5),
+    ("unigram", (1,), True, 3),
+    ("unigram+bigram", (1, 2), True, 3),
+    ("unigram+bigram", (1, 2), True, 5),
+    ("bigram 不加权", (2,), False, 3),
+    ("unigram+bigram 不加权", (1, 2), False, 5),
+]
+
+
+def _variant_scores(cases: list[dict], sizes: tuple[int, ...], weighted: bool, top_n: int):
+    from app.kb.text import tokenize
+
+    chunks = split_corpus(CORPUS_DIR)
+    retriever = Retriever(chunks, None, mode="lexical", top_k=5)
+    idf = retriever.lexical.idf
+    fallback = max(idf.values()) if idf else 1.0
+    pool_by_chunk = [set(tokenize(c.text, sizes)) for c in chunks]
+    index_of = {id(c): i for i, c in enumerate(chunks)}
+
+    def score(question: str) -> float:
+        hits = retriever.search(question).hits[:top_n]
+        if not hits:
+            return 0.0
+        wanted = set(tokenize(question, sizes))
+        if not wanted:
+            return 0.0
+        available: set[str] = set()
+        for hit in hits:
+            available |= pool_by_chunk[index_of[id(hit.chunk)]]
+        if not weighted:
+            return len(wanted & available) / len(wanted)
+        total = sum(idf.get(t, fallback) for t in wanted)
+        if total <= 0:
+            return 0.0
+        return sum(idf.get(t, fallback) for t in wanted if t in available) / total
+
+    answerable, refusable = [], []
+    for case in cases:
+        value = score(case["question"])
+        if is_refusable(case):
+            refusable.append(value)
+        elif is_answerable(case):
+            answerable.append(value)
+    return answerable, refusable
+
+
+def sweep_signals(cases: list[dict]) -> list[dict]:
+    out = []
+    for label, sizes, weighted, top_n in SIGNAL_VARIANTS:
+        answerable, refusable = _variant_scores(cases, sizes, weighted, top_n)
+        report = sweep_threshold(answerable, refusable, label)
+        report["label"] = f"{label} · top{top_n}"
+        report["sizes"] = sizes
+        report["weighted"] = weighted
+        report["top_n"] = top_n
+        out.append(report)
+    return out
+
+
+def print_signal_table(reports: list[dict], n_answerable: int) -> None:
+    print()
+    print("=" * 68)
+    print("拒答判据的不同算法对比")
+    print("=" * 68)
+    print(f"  {'判据':<26}{'阈值':>7}{'误拒答':>9}{'拒答识别':>10}{'约登':>9}")
+    for report in reports:
+        best = report["best"]
+        print(f"  {report['label']:<26}{best['threshold']:>7.3f}"
+              f"{best['false_refusal']:>9.1%}{best['detected']:>10.1%}{best['youden']:>9.3f}")
+    current = reports[0]
+    winner = max(reports, key=lambda r: r["best"]["youden"])
+    print()
+    print(f"  当前生产用的是「{current['label']}」，约登 {current['best']['youden']:.3f}")
+    if winner is current:
+        print("  → 它同时就是最好的一档，不用动。")
+        return
+    gain = winner["best"]["youden"] - current["best"]["youden"]
+    fewer = (current["best"]["false_refusal"] - winner["best"]["false_refusal"]) * n_answerable
+    print(f"  最好的一档是「{winner['label']}」，约登 {winner['best']['youden']:.3f}"
+          f"（高 {gain:.3f}），相当于少错 {fewer:.0f} 条")
+    if fewer < 2:
+        print("  → 这个样本量下少错 1 条说明不了什么，而且换过去要放弃 IDF 加权——")
+        print("    那是用来兜住「评测集里没出现过的离题问法」的。维持现状。")
+    else:
+        print("  → 差距够大，值得换。换完记得同步改 app/config.py 的默认值和 REFUSAL_THRESHOLD。")
+
+
 def print_weight_table(table: dict) -> None:
     print("=" * 68)
     print("稠密权重扫描（RRF 融合里稠密分量占的权重，0 = 纯词法）")
@@ -157,6 +254,8 @@ def main() -> int:
         answerable, refusable = collect_scores(cases, signal)
         reports[signal] = sweep_threshold(answerable, refusable, signal)
         print_threshold_table(reports[signal])
+
+    print_signal_table(sweep_signals(cases), sum(1 for c in cases if is_answerable(c)))
 
     print()
     print("=" * 68)
