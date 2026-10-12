@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>拾光优选 · 售后客服智能体</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="layout">
+
+  <!-- ============ 侧栏：系统信息 ============ -->
+  <aside class="sidebar" aria-label="系统信息">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">拾</div>
+      <div class="brand-text">
+        <h1>拾光优选</h1>
+        <p>售后客服智能体</p>
+      </div>
+    </div>
+
+    <p class="sidebar-note">回答全程公开检索来源与工具调用，不做黑箱。</p>
+
+    <section class="panel">
+      <h2 class="panel-title">运行状态</h2>
+      <div id="health-body" class="panel-body">
+        <p class="muted" id="health-loading">正在读取系统状态…</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2 class="panel-title"
+          id="tools-toggle"
+          role="button"
+          tabindex="0"
+          aria-expanded="false"
+          aria-controls="tools-body">我能查什么<span class="chev" aria-hidden="true"></span></h2>
+      <div id="tools-body" class="panel-body" hidden>
+        <p class="muted">加载中…</p>
+      </div>
+    </section>
+
+    <div id="sidebar-alert" class="alert" hidden></div>
+  </aside>
+
+  <!-- ============ 主聊天区 ============ -->
+  <main class="chat" aria-label="对话区">
+    <header class="chat-head">
+      <div>
+        <h2>售后咨询</h2>
+        <p class="muted" id="chat-sub">退换货 · 退款 · 运费 · 物流 · 发票</p>
+      </div>
+      <button id="btn-reset" class="btn-ghost" type="button">清空对话</button>
+    </header>
+
+    <div id="messages" class="messages" role="log" aria-live="polite">
+      <!-- 欢迎卡片由 JS 注入 -->
+    </div>
+
+    <div id="stream-alert" class="alert alert-inline" hidden></div>
+
+    <form id="composer" class="composer" autocomplete="off">
+      <label class="sr-only" for="input">输入你的售后问题</label>
+      <textarea id="input"
+                rows="1"
+                placeholder="描述你的售后问题，Enter 发送，Shift + Enter 换行"
+                maxlength="500"></textarea>
+      <button id="btn-send" class="btn-primary" type="submit">发送</button>
+      <button id="btn-stop" class="btn-ghost btn-stop" type="button" hidden>停止</button>
+    </form>
+  </main>
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
