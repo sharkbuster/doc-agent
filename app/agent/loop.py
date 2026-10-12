@@ -166,8 +166,14 @@ class Agent:
         for step in range(self.max_steps):
             steps = step + 1
             pieces: list[str] = []
-            tool_calls: list[dict] = []
+            merged = None
             for chunk in self.model.stream(messages):
+                # 必须把分片累积成一个完整消息再取 tool_calls。
+                # 真实模型（DeepSeek/OpenAI）会把工具参数**切片**吐出来：
+                # 第一片只有函数名、args 还是空的，后面几片才拼出 JSON。
+                # 逐片去读的话，第一次读到的是空参数、第二次读到的是半个 JSON，
+                # 每次工具调用都会失败。离线桩从不拆片，所以只有接真模型才暴露。
+                merged = chunk if merged is None else merged + chunk
                 content = chunk.content
                 if isinstance(content, str) and content:
                     pieces.append(content)
@@ -177,10 +183,9 @@ class Agent:
                         if isinstance(part, dict) and part.get("text"):
                             pieces.append(part["text"])
                             yield Event("answer_delta", {"text": part["text"]})
-                for call in getattr(chunk, "tool_calls", None) or []:
-                    tool_calls.append(dict(call))
 
             text = "".join(pieces)
+            tool_calls = [dict(call) for call in (getattr(merged, "tool_calls", None) or [])]
             if not tool_calls:
                 break
 
