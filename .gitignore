@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.pytest_cache/
+# pytest 的 tmp_path 在某些环境（TMP 没设的时候）会落在项目根目录下
+pytest-of-*/
+.coverage
+htmlcov/
+*.egg-info/
+data/index/
+# 播种脚本生成的演示数据库，不该进仓库
+data/*.db
+data/*.db-journal
+*.log
