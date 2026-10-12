@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: 测试 (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: 单元测试
+        run: python -m pytest -q
+
+      - name: 端到端自检
+        run: python -m scripts.selfcheck
+
+  eval-gate:
+    name: 指标回归门禁
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      # 检索质量掉下来是不会有任何报错的：接口照样返回 200，回答照样生成，
+      # 只是依据的条款开始变得不相干。所以必须有一道量化门禁卡着。
+      # 这里是离线桩模型，测的是检索和拒答；真实模型的回答质量
+      # 需要在本地配好密钥后跑 `python -m scripts.evaluate`。
+      - name: 跑评测集并检查阈值
+        run: python -m scripts.evaluate --gate
+
+      - name: 上传评测报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-result
+          path: data/eval/eval_result.json
+          if-no-files-found: warn
