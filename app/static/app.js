@@ -389,7 +389,10 @@
         head.appendChild($('span', 'cite-idx', '[' + item.index + ']'));
         head.appendChild($('span', 'cite-label', item.label || ('片段 ' + item.index)));
         var metaBits = [];
-        if (item.dense != null) { metaBits.push('相似度 ' + fmtScore(item.dense)); }
+        /* 用真值判断而不是 != null：纯词法模式下 dense 恒为 0，
+           显示「相似度 0.00」是误导 */
+        if (item.dense) { metaBits.push('相似度 ' + fmtScore(item.dense)); }
+        if (item.lexical) { metaBits.push('词法 ' + fmtScore(item.lexical)); }
         if (item.score != null) { metaBits.push('融合 ' + fmtScore(item.score)); }
         if (metaBits.length) {
           head.appendChild($('span', 'cite-meta', metaBits.join(' · ')));
@@ -545,11 +548,15 @@
       ctx.hitCount = Array.isArray(ev.hits) ? ev.hits.length : 0;
       ctx.topDense = ev.top_dense;
       ctx.kbMatched = ev.kb_matched;
+      /* 按后端实际用的判据来标。默认是纯词法检索，没有余弦分，
+         照旧写「相似度 0.00」会让人以为检索挂了。 */
+      var signalName = ev.refusal_signal === 'dense' ? '相似度' : '覆盖度';
+      var signalValue = (ev.refusal_score != null) ? ev.refusal_score : ev.top_dense;
       var label;
       if (ctx.hitCount > 0) {
-        label = '检索到 ' + ctx.hitCount + ' 条条款（相似度 ' + fmtScore(ev.top_dense) + '）';
+        label = '检索到 ' + ctx.hitCount + ' 条条款（' + signalName + ' ' + fmtScore(signalValue) + '）';
       } else {
-        label = '知识库未命中相关条款（相似度 ' + fmtScore(ev.top_dense) + '）';
+        label = '知识库未命中相关条款（' + signalName + ' ' + fmtScore(signalValue) + '）';
       }
       settleStep(addStep(ctx, label, ctx.hitCount > 0 ? null : 'warn'));
       return;
@@ -807,6 +814,21 @@
   var ordersFailed = false;
   var booted = false;
 
+  /* ?q=... 打开链接就直接把这个问题问出去。
+     两个用途：把某个问题连答案一起分享给别人；以及给无头浏览器截图留一个入口——
+     截图工具点不了按钮，只能靠 URL 带参数。 */
+  function autoAsk() {
+    var question = null;
+    try {
+      question = new URLSearchParams(location.search).get('q');
+    } catch (err) {
+      return;   /* 很老的浏览器没有 URLSearchParams，就当没这个功能 */
+    }
+    if (question && question.trim()) {
+      send(question.trim());
+    }
+  }
+
   function boot() {
     if (booted) { return; }
     booted = true;
@@ -856,12 +878,14 @@
         ordersFailed = false;
         clear(elMessages);
         renderWelcome(cachedOrders, false);
+        autoAsk();
       })
       .catch(function () {
         cachedOrders = [];
         ordersFailed = true;
         clear(elMessages);
         renderWelcome([], true);
+        autoAsk();
       });
 
     elInput.focus();

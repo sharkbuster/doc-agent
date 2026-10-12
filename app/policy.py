@@ -169,7 +169,7 @@ def evaluate_return(
         message = (f"{names}不适用 7 天无理由退货。"
                    f"如果商品存在质量问题，可以按质量问题走 15 个自然日的窗口。")
     else:
-        message = f"符合{REASONS[reason]}，期限还剩 {days_left} 天。"
+        message = f"符合「{REASONS[reason]}」，期限还剩 {days_left} 天。"
 
     return {
         **base,

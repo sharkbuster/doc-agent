@@ -143,6 +143,9 @@ class Agent:
             "top_dense": round(result.top_dense, 4),
             "top_coverage": round(result.top_coverage, 4),
             "refusal_score": round(result.refusal_score, 4),
+            # 把判据名字也带出去：前端要按实际判据标注，
+            # 否则纯词法模式下会显示「相似度 0.00」，看着像检索失败了
+            "refusal_signal": result.refusal_signal,
             "kb_matched": kb_matched,
             "hits": hits,
         })

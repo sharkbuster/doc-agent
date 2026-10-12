@@ -6,7 +6,9 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
+from urllib.parse import urljoin
 
 import pytest
 from fastapi.testclient import TestClient
@@ -184,6 +186,19 @@ def test_stream_retrieval_frame_carries_hits(client):
     assert "label" in retrieval["hits"][0] and "text" in retrieval["hits"][0]
 
 
+def test_stream_retrieval_frame_declares_the_refusal_signal(client):
+    """前端要按实际判据标注分数。
+
+    原来固定写「相似度」，而默认是纯词法检索、没有余弦分，
+    页面上就会显示「检索到 5 条条款（相似度 0.00）」——看着像检索失败了。
+    """
+    frames = frames_of(client, "退货运费谁承担")
+    retrieval = frames[0]
+    assert retrieval["refusal_signal"] in ("coverage", "dense")
+    assert retrieval["top_coverage"] >= 0
+    assert 0.0 <= retrieval["refusal_score"] <= 1.0
+
+
 def test_stream_model_failure_emits_error_frame(client):
     runtime.set_agent(BoomAgent())
     frames = frames_of(client, "能退吗")
@@ -197,3 +212,37 @@ def test_stream_model_failure_emits_error_frame(client):
 def test_stream_rejects_blank_question(client):
     response = client.post("/api/chat/stream", json={"question": "  "})
     assert response.status_code == 422
+
+
+# ---------------------------------------------------------------- 页面与静态资源
+
+
+def test_index_page_is_served(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "<title>" in response.text
+
+
+def test_every_asset_referenced_by_the_page_is_reachable(client):
+    """页面里引用的每个静态资源都必须真的能取到。
+
+    这条是补出来的：index.html 原来用相对路径引 `style.css` / `app.js`，
+    浏览器从 `/` 解析成 `/style.css`，而静态文件挂在 `/static` 下 —— 两个都 404。
+    后果是页面在真浏览器里是一堆没有样式的裸 HTML，JS 也完全没执行。
+    单元测试当时全绿，因为只检查了「HTML 里写了相对路径」，没检查那个路径能不能取到。
+    """
+    html = client.get("/").text
+    refs = re.findall(r'(?:href|src)="([^"]+)"', html)
+    assert refs, "页面里一个资源引用都没有，不对劲"
+    for ref in refs:
+        if ref.startswith(("http://", "https://", "//", "#", "data:")):
+            continue
+        url = urljoin("/", ref)
+        response = client.get(url)
+        assert response.status_code == 200, f"{ref} 被解析成 {url}，取不到"
+
+
+def test_static_assets_have_the_right_content_type(client):
+    assert client.get("/static/style.css").headers["content-type"].startswith("text/css")
+    assert "javascript" in client.get("/static/app.js").headers["content-type"]

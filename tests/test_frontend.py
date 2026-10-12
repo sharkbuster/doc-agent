@@ -65,9 +65,12 @@ def test_hidden_attribute_is_enforced(sources):
     )
 
 
-def test_html_loads_local_assets_with_relative_paths(sources):
-    assert 'href="style.css"' in sources["html"]
-    assert 'src="app.js"' in sources["html"]
+def test_html_references_assets_under_the_static_mount(sources):
+    # 必须是 /static/... 这种绝对路径。写相对路径 style.css 的话，
+    # 页面在 / 上会被解析成 /style.css，而静态目录挂在 /static 下 —— 浏览器 404，
+    # 页面变成一堆没样式的裸 HTML，JS 也完全不执行。这个坑真踩过。
+    assert 'href="/static/style.css"' in sources["html"]
+    assert 'src="/static/app.js"' in sources["html"]
 
 
 def test_no_external_resources(sources):
@@ -92,6 +95,13 @@ def test_frontend_parses_sse_manually(sources):
 def test_no_inline_event_handlers(sources):
     # 内联 onclick 会和 CSP 打架，也不好调试
     assert not re.search(r"""\son(click|change|submit)\s*=""", sources["html"])
+
+
+def test_frontend_labels_the_score_by_the_actual_signal(sources):
+    # 判据是覆盖度就不能写成「相似度」：纯词法模式下余弦恒为 0，
+    # 标成相似度会显示成「相似度 0.00」，看着像检索挂了
+    assert "refusal_signal" in sources["js"]
+    assert "覆盖度" in sources["js"]
 
 
 def test_stylesheet_targets_narrow_screens(sources):
