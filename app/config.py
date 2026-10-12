@@ -80,7 +80,9 @@ class Settings:
             llm_provider=_str("LLM_PROVIDER", "stub").lower(),
             deepseek_api_key=_str("DEEPSEEK_API_KEY"),
             deepseek_base_url=_str("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
-            deepseek_model=_str("DEEPSEEK_MODEL", "deepseek-chat"),
+            # 官方现在的模型名是 deepseek-flash。旧的 deepseek-chat 仍然接受
+            # （官方文档写明由同一个模型服务、按同一价格计费），所以老配置不会被改坏。
+            deepseek_model=_str("DEEPSEEK_MODEL", "deepseek-flash"),
             openai_api_key=_str("OPENAI_API_KEY"),
             openai_base_url=_str("OPENAI_BASE_URL"),
             openai_model=_str("OPENAI_MODEL", "gpt-4o-mini"),

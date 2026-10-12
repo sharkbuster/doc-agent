@@ -276,7 +276,7 @@ CI 从一分钟变十分钟，大多数人到这一步就放弃了。所以内�
 | `LLM_PROVIDER` | `stub` | `stub`（离线桩）/ `deepseek` / `openai` |
 | `DEEPSEEK_API_KEY` | 空 | 用 DeepSeek 时必填 |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com/v1` | |
-| `DEEPSEEK_MODEL` | `deepseek-chat` | |
+| `DEEPSEEK_MODEL` | `deepseek-flash` | 旧名 `deepseek-chat` 仍然接受，按同一价格计费 |
 | `OPENAI_API_KEY` / `_BASE_URL` / `_MODEL` | 空 | 任意 OpenAI 兼容网关 |
 | `EMBEDDING_BACKEND` | `hashing` | `hashing`（内置，零下载）/ `api` |
 | `EMBEDDING_DIM` | `1024` | 哈希向量的维度 |

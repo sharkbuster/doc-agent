@@ -56,7 +56,7 @@ def _frame(delta: dict, finish: str | None = None) -> str:
         "id": "chatcmpl-test",
         "object": "chat.completion.chunk",
         "created": 0,
-        "model": "deepseek-chat",
+        "model": "deepseek-flash",
         "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
     }
     return "data: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
@@ -101,7 +101,7 @@ def mock_model(responder):
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
     model = ChatOpenAI(
-        model="deepseek-chat",
+        model="deepseek-flash",
         api_key="sk-not-a-real-key",
         base_url="https://api.deepseek.com/v1",
         http_client=client,
@@ -119,10 +119,10 @@ def has_tool_result(body: dict) -> bool:
 
 def test_build_model_returns_chatopenai_for_deepseek():
     settings = replace(Settings.from_env(), llm_provider="deepseek",
-                       deepseek_api_key="sk-abc", deepseek_model="deepseek-chat")
+                       deepseek_api_key="sk-abc", deepseek_model="deepseek-flash")
     model = build_model(settings)
     assert isinstance(model, ChatOpenAI)
-    assert model.model_name == "deepseek-chat"
+    assert model.model_name == "deepseek-flash"
     assert str(model.openai_api_base).rstrip("/") == "https://api.deepseek.com/v1"
 
 
@@ -232,7 +232,7 @@ def test_api_error_is_surfaced_not_swallowed(retriever):
         return httpx.Response(401, json={"error": {"message": "Authentication Fails"}})
 
     client = httpx.Client(transport=httpx.MockTransport(failing))
-    model = ChatOpenAI(model="deepseek-chat", api_key="sk-bad",
+    model = ChatOpenAI(model="deepseek-flash", api_key="sk-bad",
                        base_url="https://api.deepseek.com/v1", http_client=client, max_retries=0)
     with pytest.raises(Exception) as info:
         Agent(model, retriever, toolkit.TOOLS).run("7 天无理由退货是几天")
