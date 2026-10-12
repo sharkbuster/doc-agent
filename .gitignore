@@ -13,4 +13,6 @@ data/index/
 # 播种脚本生成的演示数据库，不该进仓库
 data/*.db
 data/*.db-journal
+# 评测结果是每次跑出来的产物，README 里已经记了数字，CI 也会上传成 artifact
+data/eval/eval_result.json
 *.log
