@@ -67,7 +67,10 @@ class Settings:
     embedding_model: str
     embedding_dim: int
     db_path: str
+    retrieval_mode: str
+    dense_weight: float
     top_k: int
+    refusal_signal: str
     refusal_threshold: float
 
     @classmethod
@@ -87,8 +90,14 @@ class Settings:
             embedding_model=_str("EMBEDDING_MODEL", "text-embedding-3-small"),
             embedding_dim=_int("EMBEDDING_DIM", 1024),
             db_path=_str("DB_PATH", str(DATA_DIR / "demo.db")),
+            # 默认纯词法检索。这是 scripts/calibrate.py 扫出来的结论，不是偷懒：
+            # 内置的字符 n-gram 哈希向量在这个语料上任何权重配置都跑不赢 BM25。
+            # 接了真实嵌入模型之后应当把这个值调回 hybrid 并重扫权重。
+            retrieval_mode=_str("RETRIEVAL_MODE", "lexical").lower(),
+            dense_weight=_float("DENSE_WEIGHT", 0.0),
             top_k=_int("RETRIEVAL_TOP_K", 5),
-            refusal_threshold=_float("REFUSAL_THRESHOLD", 0.35),
+            refusal_signal=_str("REFUSAL_SIGNAL", "coverage").lower(),
+            refusal_threshold=_float("REFUSAL_THRESHOLD", 0.05),
         )
 
     def llm_target(self) -> tuple[str, str, str]:
@@ -113,6 +122,9 @@ class Settings:
             "llm_base_url": base_url,
             "api_key_configured": bool(self.llm_target()[0]),
             "embedding": embedding,
+            "retrieval_mode": self.retrieval_mode,
+            "dense_weight": self.dense_weight,
             "top_k": self.top_k,
+            "refusal_signal": self.refusal_signal,
             "refusal_threshold": self.refusal_threshold,
         }

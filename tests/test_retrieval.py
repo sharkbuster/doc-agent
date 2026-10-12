@@ -316,12 +316,52 @@ def test_below_threshold_marks_off_topic_questions(chunks):
     assert engine.search("无理由退货的运费谁出").below(0.0) is False
 
 
-def test_below_threshold_raises_without_dense_scores(chunks):
-    # 词法模式没有绝对量纲，不能悄悄返回一个「看起来能用」的布尔值
-    result = Retriever(chunks, mode="lexical").search("运费")
+def test_coverage_is_the_default_refusal_signal(chunks):
+    # 余弦实测分不开「该答」和「该拒」，默认换成覆盖度了
+    result = retriever(chunks).search("退货运费谁承担")
+    assert result.refusal_signal == "coverage"
+    assert result.refusal_score == result.top_coverage
+
+
+def test_coverage_works_without_an_embedder(chunks):
+    # 覆盖度只依赖语料本身，所以纯词法模式下也能用来判断该不该拒答，
+    # 不像余弦那样一关掉稠密检索就失去依据
+    result = Retriever(chunks, mode="lexical").search("退货运费谁承担")
+    assert result.has_dense is False
+    assert result.top_coverage > 0
+    assert result.below(0.0) is False
+
+
+def test_off_topic_question_has_lower_coverage_than_on_topic(chunks):
+    engine = retriever(chunks)
+    on_topic = engine.search("定制商品能不能无理由退货").top_coverage
+    off_topic = engine.search("怎么申请提高信用卡额度").top_coverage
+    assert on_topic > off_topic
+
+
+def test_coverage_weights_rare_bigrams_higher(chunks):
+    # 「的」这种字到处都是，不加权的话什么离题问题都能蹭到不错的覆盖度
+    engine = retriever(chunks)
+    generic = engine.search("的东西是什么的").top_coverage
+    specific = engine.search("无理由退货运费").top_coverage
+    assert specific > generic
+
+
+def test_below_threshold_raises_when_dense_signal_has_no_scores(chunks):
+    result = Retriever(chunks, mode="lexical", refusal_signal="dense").search("运费")
     assert result.has_dense is False
     with pytest.raises(ValueError, match="拒答"):
         result.below(0.5)
+
+
+def test_unknown_refusal_signal_rejected(chunks):
+    with pytest.raises(ValueError, match="拒答判据"):
+        Retriever(chunks, mode="lexical", refusal_signal="magic")
+
+
+def test_dense_weight_must_not_be_negative(chunks):
+    with pytest.raises(ValueError, match="dense_weight"):
+        retriever(chunks, dense_weight=-1)
 
 
 def test_empty_corpus_returns_empty_result():

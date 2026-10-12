@@ -46,21 +46,30 @@ class SearchResult:
     query: str
     hits: list[Hit]
     top_dense: float
+    top_coverage: float = 0.0
     has_dense: bool = True
+    refusal_signal: str = "coverage"
 
     @property
     def top(self) -> Hit | None:
         return self.hits[0] if self.hits else None
 
+    @property
+    def refusal_score(self) -> float:
+        return self.top_coverage if self.refusal_signal == "coverage" else self.top_dense
+
     def below(self, threshold: float) -> bool:
         """知识库里没有相关内容——该拒答，而不是让模型硬编一个。
 
-        只有稠密检索才给出有绝对意义的相似度，所以纯词法模式下这个方法没有依据，
-        宁可报错也不返回一个看起来能用、实际取决于 BM25 量纲的布尔值。
+        默认判据是覆盖度，不是余弦。原因是实测出来的：在这个语料上，
+        「该回答的问题」和「该拒答的问题」的余弦分区间几乎完全重叠
+        （0.13~0.33 对 0.11~0.18），拿它当阈值等于随机拒答。
+        覆盖度问的是另一个问题——问题里的词组到底有没有在召回的条款里出现过，
+        这个才分得开。数字见 README 的评测表。
         """
-        if not self.has_dense:
-            raise ValueError("词法检索模式没有稠密分，判断不了是否该拒答")
-        return self.top_dense < threshold
+        if self.refusal_signal == "dense" and not self.has_dense:
+            raise ValueError("纯词法检索模式没有稠密分，判断不了是否该拒答")
+        return self.refusal_score < threshold
 
 
 class BM25:
@@ -112,16 +121,27 @@ class Retriever:
         mode: str = "hybrid",
         top_k: int = 5,
         rrf_k: int = RRF_K,
+        dense_weight: float = 1.0,
+        refusal_signal: str = "coverage",
         backend: str = "auto",
     ) -> None:
         if mode not in ("hybrid", "dense", "lexical"):
             raise ValueError(f"未知检索模式: {mode}")
+        if refusal_signal not in ("coverage", "dense"):
+            raise ValueError(f"未知拒答判据: {refusal_signal}")
+        if dense_weight < 0:
+            raise ValueError("dense_weight 不能为负")
         self.chunks = list(chunks)
         self.mode = mode
         self.top_k = top_k
         self.rrf_k = rrf_k
+        self.refusal_signal = refusal_signal
+        # 稠密分量在融合里的权重。等权是默认值，但实测发现压到 0.3 才不拖累词法，
+        # 具体数字见 README；调参用 scripts/calibrate.py 扫，不要拍脑袋改。
+        self.dense_weight = dense_weight
         self.embedder = embedder
         self.lexical = BM25([tokenize(c.text) for c in self.chunks])
+        self._bigrams = [set(tokenize(c.text, (2,))) for c in self.chunks]
         self.index = None
         if mode != "lexical" and self.chunks:
             if embedder is None:
@@ -135,6 +155,32 @@ class Retriever:
     def backend(self) -> str:
         return self.index.backend if self.index else "none"
 
+    def coverage(self, query_tokens: Sequence[str], indices: Sequence[int]) -> float:
+        """问题里的 bigram 有多少在召回的条款里出现过，按 IDF 加权。
+
+        比余弦更适合当拒答判据：它衡量的是「问题问的东西，条款里到底提没提」，
+        而不是两个向量的方向有多接近——后者会被长度差异和哈希碰撞稀释掉。
+        实测约登指数 0.917 对 0.639，见 README。
+
+        IDF 加权也是必需的：「的」「是」这类字构成的 bigram 到处都是，
+        不加权的话什么离题问题都能蹭到不错的覆盖度。实测加权把误拒答从 11.1% 降到 8.3%。
+        """
+        query_bigrams = {t for t in query_tokens if len(t) == 2}
+        if not query_bigrams or not indices:
+            return 0.0
+        available: set[str] = set()
+        for index in indices:
+            available |= self._bigrams[index]
+        idf = self.lexical.idf
+        # 语料里压根没出现过的 bigram，恰恰最能说明这个问题不在知识库范围内，
+        # 所以给它最高权重，而不是当成 0 忽略掉
+        fallback = max(idf.values()) if idf else 1.0
+        total = sum(idf.get(t, fallback) for t in query_bigrams)
+        if total <= 0:
+            return 0.0
+        hit = sum(idf.get(t, fallback) for t in query_bigrams if t in available)
+        return hit / total
+
     def search(self, query: str, k: int | None = None) -> SearchResult:
         k = self.top_k if k is None else k
         has_dense = self.index is not None
@@ -143,7 +189,6 @@ class Retriever:
             # 查不出词就没有可检索的东西。不拦住的话，全零查询向量和每个片段的
             # 余弦都是 0，排序退化成「按下标」，会返回一堆纯属凑数的来源。
             return SearchResult(query=query, hits=[], top_dense=0.0, has_dense=has_dense)
-
         fetch = min(len(self.chunks), max(k * _FETCH_FACTOR, _FETCH_MIN))
         dense_ranked: list[tuple[int, float]] = []
         top_dense = 0.0
@@ -175,12 +220,14 @@ class Retriever:
         for idx in set(dense_pos) | set(lexical_pos):
             total = 0.0
             if idx in dense_pos:
-                total += 1.0 / (self.rrf_k + dense_pos[idx])
+                total += self.dense_weight / (self.rrf_k + dense_pos[idx])
             if idx in lexical_pos:
                 total += 1.0 / (self.rrf_k + lexical_pos[idx])
             fused.append((total, idx))
         # 融合分相同时按下标升序，保证同一份语料每次排序结果一致
         fused.sort(key=lambda item: (-item[0], item[1]))
+        selected = fused[:k]
+        coverage = self.coverage(query_tokens, [idx for _, idx in selected[:3]])
 
         hits = [
             Hit(
@@ -191,6 +238,13 @@ class Retriever:
                 dense_rank=dense_pos.get(idx),
                 lexical_rank=lexical_pos.get(idx),
             )
-            for score, idx in fused[:k]
+            for score, idx in selected
         ]
-        return SearchResult(query=query, hits=hits, top_dense=top_dense, has_dense=has_dense)
+        return SearchResult(
+            query=query,
+            hits=hits,
+            top_dense=top_dense,
+            top_coverage=coverage,
+            has_dense=has_dense,
+            refusal_signal=self.refusal_signal,
+        )

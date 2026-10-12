@@ -20,5 +20,12 @@ def build_retriever(settings, directory=None) -> Retriever:
         # 语料目录空了还照常启动的话，每个问题都会走「知识库里没有」，
         # 现象是「答什么都拒答」，极难联想到是语料没加载上
         raise RuntimeError("知识库是空的，检查 data/corpus 下有没有 .md 文件")
-    embedder = build_embedder(settings)
-    return Retriever(chunks, embedder, top_k=settings.top_k)
+    embedder = None if settings.retrieval_mode == "lexical" else build_embedder(settings)
+    return Retriever(
+        chunks,
+        embedder,
+        mode=settings.retrieval_mode,
+        top_k=settings.top_k,
+        dense_weight=settings.dense_weight,
+        refusal_signal=settings.refusal_signal,
+    )

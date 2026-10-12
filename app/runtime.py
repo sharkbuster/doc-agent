@@ -12,7 +12,7 @@ from typing import Callable
 
 from .config import Settings, load_dotenv_file
 from .policy import now_utc
-from .store import db
+from .store import db, queries
 
 _settings: Settings | None = None
 _connection: sqlite3.Connection | None = None
@@ -52,8 +52,14 @@ def set_settings(value: Settings | None) -> None:
 def get_connection() -> sqlite3.Connection:
     global _connection
     if _connection is None:
-        _connection = db.connect(settings().db_path)
-        db.init_schema(_connection)
+        conn = db.connect(settings().db_path)
+        db.init_schema(conn)
+        # 空库自动播种。不这么做的话，刚克隆下来的人直接起服务，会看到一个
+        # 能聊天但一个订单都查不到的机器人——他没法判断这是坏了还是本来就没数据。
+        # 要用新日期重新造演示数据，跑 scripts/seed.py 即可。
+        if queries.count_orders(conn) == 0:
+            db.seed(conn)
+        _connection = conn
     return _connection
 
 

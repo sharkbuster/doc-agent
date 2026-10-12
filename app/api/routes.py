@@ -55,11 +55,18 @@ def health() -> dict:
             "api_key_configured": view["api_key_configured"],
         },
         "corpus": {"documents": documents, "chunks": chunks},
+        "database": {
+            "path": cfg.db_path,
+            "orders": queries.count_orders(runtime.get_connection()),
+        },
         "embedding": view["embedding"],
         "tools": [tool.name for tool in toolkit.TOOLS],
         "retrieval": {
             "backend": backend,
+            "mode": view["retrieval_mode"],
+            "dense_weight": view["dense_weight"],
             "top_k": view["top_k"],
+            "refusal_signal": view["refusal_signal"],
             "refusal_threshold": view["refusal_threshold"],
         },
     }

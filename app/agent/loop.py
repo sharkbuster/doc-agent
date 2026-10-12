@@ -141,6 +141,8 @@ class Agent:
         yield Event("retrieval", {
             "query": question,
             "top_dense": round(result.top_dense, 4),
+            "top_coverage": round(result.top_coverage, 4),
+            "refusal_score": round(result.refusal_score, 4),
             "kb_matched": kb_matched,
             "hits": hits,
         })

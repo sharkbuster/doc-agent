@@ -29,8 +29,6 @@ from app.agent.llm import StubChatModel  # noqa: E402
 from app.agent.loop import Agent  # noqa: E402
 from app.config import CORPUS_DIR  # noqa: E402
 from app.kb.corpus import load_chunks  # noqa: E402
-from app.kb.embedder import HashingEmbedder  # noqa: E402
-from app.kb.retriever import Retriever  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.store import db, queries  # noqa: E402
 
@@ -60,13 +58,22 @@ def main() -> int:
     check("每个片段都有来源标签", all(c.label for c in chunks))
 
     print("\n[2] 检索")
-    retriever = Retriever(chunks, HashingEmbedder(dim=1024), top_k=5)
+    runtime.set_retriever(None)
+    settings = runtime.settings()
+    retriever = runtime.get_retriever()
     result = retriever.search("退货运费谁承担")
-    check("查得到结果", bool(result.hits), f"top_dense={result.top_dense:.3f}")
-    check("最高分是全局最大", result.top_dense >= max((h.dense for h in result.hits), default=0))
+    check("查得到结果", bool(result.hits),
+          f"覆盖度={result.top_coverage:.3f} 余弦={result.top_dense:.3f} 模式={settings.retrieval_mode}")
+    check("判据取值在合理区间", 0.0 <= result.refusal_score <= 1.0,
+          f"{settings.refusal_signal}={result.refusal_score:.3f}")
+    answerable = retriever.search("退款要等几天才能到账")
+    check("知识库内的问题不触发拒答",
+          not answerable.below(settings.refusal_threshold),
+          f"{answerable.refusal_score:.3f} >= {settings.refusal_threshold}")
     off_topic = retriever.search("怎么申请提高信用卡额度")
-    check("超纲问题识别为知识库外", off_topic.below(0.35) or not off_topic.hits,
-          f"top_dense={off_topic.top_dense:.3f}")
+    check("超纲问题识别为知识库外",
+          off_topic.below(settings.refusal_threshold),
+          f"{off_topic.refusal_score:.3f} < {settings.refusal_threshold}")
 
     print("\n[3] 订单数据")
     clock = policy.now_utc()
