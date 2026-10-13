@@ -176,23 +176,43 @@ def build_agent() -> tuple[Agent, str]:
 
 
 def agent_metrics(agent: Agent, cases: list[dict]) -> dict:
+    """跑每一轮问答，统计工具选择、拒答、引用。
+
+    工具选择的主指标是「期望的工具有没有在调用链里出现过」，不是「第一个工具是不是它」。
+    这个区别是接上真模型之后才发现的：模型的习惯是先 query_order 看清订单、再调具体工具，
+    按「第一个」算的话它会被判错 6 次——而它其实每次都调对了。
+    离线桩按关键词只挑一个工具，所以这个错误假设一直没暴露出来。
+    """
     tool_cases = [c for c in cases if c["expected_tool"]]
-    correct = 0
+    hit = 0
+    first_hit = 0
     confusion: Counter[str] = Counter()
     mismatches: list[dict] = []
+    details: list[dict] = []
     answers: dict[str, object] = {}
+
     for case in tool_cases:
         answer = agent.run(case["question"])
         answers[case["id"]] = answer
-        picked = answer.tool_calls[0]["name"] if answer.tool_calls else ""
-        if picked == case["expected_tool"]:
-            correct += 1
+        called = [call["name"] for call in answer.tool_calls]
+        first = called[0] if called else ""
+        ok = case["expected_tool"] in called
+        if ok:
+            hit += 1
         else:
-            confusion[f"{case['expected_tool']} -> {picked or '（没调工具）'}"] += 1
+            confusion[f"{case['expected_tool']} -> {'/'.join(called) or '（没调工具）'}"] += 1
             mismatches.append({
                 "id": case["id"], "question": case["question"],
-                "expected": case["expected_tool"], "picked": picked,
+                "expected": case["expected_tool"], "called": called,
             })
+        if first == case["expected_tool"]:
+            first_hit += 1
+        details.append({
+            "id": case["id"], "type": case["type"], "question": case["question"],
+            "expected_tool": case["expected_tool"], "called": called, "hit": ok,
+            "first": first, "answer_chars": len(answer.text),
+            "citations": len(answer.citations),
+        })
 
     refuse_cases = [c for c in cases if c["should_refuse"]]
     refused_right = 0
@@ -201,6 +221,11 @@ def agent_metrics(agent: Agent, cases: list[dict]) -> dict:
         answers[case["id"]] = answer
         if answer.refused:
             refused_right += 1
+        details.append({
+            "id": case["id"], "type": case["type"], "question": case["question"],
+            "should_refuse": True, "refused": answer.refused,
+            "citations": len(answer.citations),
+        })
 
     answerable = [c for c in cases if not c["should_refuse"]]
     false_refusals = []
@@ -212,6 +237,11 @@ def agent_metrics(agent: Agent, cases: list[dict]) -> dict:
         if answer is None:
             answer = agent.run(case["question"])
             answers[case["id"]] = answer
+            details.append({
+                "id": case["id"], "type": case["type"], "question": case["question"],
+                "refused": answer.refused, "citations": len(answer.citations),
+                "answer_chars": len(answer.text),
+            })
         if answer.refused:
             false_refusals.append(case["id"])
         if case["type"] in ("policy", "hybrid"):
@@ -221,9 +251,13 @@ def agent_metrics(agent: Agent, cases: list[dict]) -> dict:
         # 越界引用在循环里已经被丢掉，这里再确认一次没有漏网的
         leaks += sum(1 for c in answer.citations if c["index"] < 1 or c["index"] > len(answer.hits))
 
+    total = len(tool_cases) or 1
     return {
         "tool_total": len(tool_cases),
-        "tool_accuracy": round(correct / len(tool_cases), 4) if tool_cases else 0.0,
+        "tool_accuracy": round(hit / total, 4),
+        # 次要指标：第一个工具就选对的比例。接真模型后这个值会明显低于上面那个，
+        # 差额就是「先查订单再动手」这种多步行为的占比。
+        "tool_first_accuracy": round(first_hit / total, 4),
         "tool_confusion": dict(confusion),
         "tool_mismatches": mismatches[:15],
         "refuse_total": len(refuse_cases),
@@ -232,6 +266,7 @@ def agent_metrics(agent: Agent, cases: list[dict]) -> dict:
         "citation_expected": citation_expected,
         "citation_coverage": round(citation_covered / citation_expected, 4) if citation_expected else 0.0,
         "citation_leak": leaks,
+        "details": details,
     }
 
 
@@ -267,7 +302,9 @@ def print_report(report: dict) -> None:
     print(f"工具选择 / 拒答 / 引用（模型：{report['llm_provider']}）")
     print("=" * 66)
     print(f"  工具选择准确率 : {agent_part['tool_accuracy']:.3f}  "
-          f"({agent_part['tool_total']} 条)")
+          f"({agent_part['tool_total']} 条，看整个调用链)")
+    print(f"  首个工具即正确 : {agent_part['tool_first_accuracy']:.3f}  "
+          f"（差额说明模型倾向于先查订单再动手）")
     print(f"  拒答准确率     : {agent_part['refusal_accuracy']:.3f}  "
           f"({agent_part['refuse_total']} 条)")
     print(f"  引用覆盖率     : {agent_part['citation_coverage']:.3f}  "
