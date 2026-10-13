@@ -199,6 +199,10 @@ def build_model(settings) -> BaseChatModel:
     kwargs: dict[str, Any] = {"model": model, "api_key": api_key, "temperature": 0.2, "timeout": 60}
     if base_url:
         kwargs["base_url"] = base_url
+    # DeepSeek 的思考模式开关走 extra_body（OpenAI 兼容格式）。
+    # 注意：思考模式下 temperature 不生效，官方文档明确写了「不报错但也没用」。
+    if provider == "deepseek" and settings.deepseek_thinking in ("enabled", "disabled"):
+        kwargs["extra_body"] = {"thinking": {"type": settings.deepseek_thinking}}
     # 失败重试交给上层决定要不要重来，模型层重试只会让超时叠加
     kwargs["max_retries"] = 1
     return ChatOpenAI(**kwargs)

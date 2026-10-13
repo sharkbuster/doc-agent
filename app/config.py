@@ -58,6 +58,7 @@ class Settings:
     deepseek_api_key: str
     deepseek_base_url: str
     deepseek_model: str
+    deepseek_thinking: str
     openai_api_key: str
     openai_base_url: str
     openai_model: str
@@ -83,6 +84,11 @@ class Settings:
             # 官方现在的模型名是 deepseek-flash。旧的 deepseek-chat 仍然接受
             # （官方文档写明由同一个模型服务、按同一价格计费），所以老配置不会被改坏。
             deepseek_model=_str("DEEPSEEK_MODEL", "deepseek-flash"),
+            # 思考模式官方默认开着。实测同一个问题的差别很大：
+            #   开：输出 293 token（其中思考 260）、耗时 7.2 秒
+            #   关：输出  13 token（思考 0）  、耗时 0.9 秒
+            # 客服问答要的是快和便宜，所以生产环境建议关掉；默认值仍然跟随官方。
+            deepseek_thinking=_str("DEEPSEEK_THINKING", "enabled").lower(),
             openai_api_key=_str("OPENAI_API_KEY"),
             openai_base_url=_str("OPENAI_BASE_URL"),
             openai_model=_str("OPENAI_MODEL", "gpt-4o-mini"),

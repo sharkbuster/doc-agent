@@ -138,6 +138,16 @@ def test_build_model_keeps_stub_as_default():
     assert isinstance(build_model(replace(Settings.from_env(), llm_provider="stub")), StubChatModel)
 
 
+def test_thinking_mode_is_passed_through_for_deepseek():
+    # DeepSeek 的思考模式开关只能走 extra_body，走错地方不会报错、只会静默失效
+    settings = replace(Settings.from_env(), llm_provider="deepseek",
+                       deepseek_api_key="sk-abc", deepseek_thinking="disabled")
+    assert build_model(settings).extra_body == {"thinking": {"type": "disabled"}}
+
+    settings = replace(settings, deepseek_thinking="enabled")
+    assert build_model(settings).extra_body == {"thinking": {"type": "enabled"}}
+
+
 # ------------------------------------------------------------------ 工具调用往返
 
 
