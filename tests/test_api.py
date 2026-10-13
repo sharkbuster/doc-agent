@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import replace
 from datetime import datetime, timezone
 from urllib.parse import urljoin
 
@@ -17,7 +18,7 @@ from app import runtime
 from app.agent import tools as toolkit
 from app.agent.llm import StubChatModel
 from app.agent.loop import Agent
-from app.config import CORPUS_DIR
+from app.config import CORPUS_DIR, Settings
 from app.kb.chunker import split_corpus
 from app.kb.embedder import HashingEmbedder
 from app.kb.retriever import Retriever
@@ -50,6 +51,12 @@ def client(retriever):
     runtime.set_clock(lambda: NOW)
     runtime.set_retriever(retriever)
     runtime.set_agent(Agent(StubChatModel(), retriever, toolkit.TOOLS))
+    # 把配置钉死成离线桩：否则本机 .env 里配了真模型时，
+    # 健康检查那几条断言会随环境变化——"测试是否通过"不该取决于你有没有填密钥
+    runtime.set_settings(replace(
+        Settings.from_env(), llm_provider="stub",
+        deepseek_api_key="", openai_api_key="", embedding_api_key="",
+    ))
     with TestClient(create_app()) as test_client:
         yield test_client
     runtime.reset()
@@ -79,10 +86,23 @@ def test_health_reports_corpus_and_tools(client):
 
 
 def test_health_does_not_leak_api_key(client):
-    data = client.get("/api/health").json()
-    assert data["llm"]["provider"] == "stub"
-    assert data["llm"]["api_key_configured"] is False
-    # 健康检查只允许暴露「配没配」，不许把密钥字段本身带出来
+    """健康检查只能暴露「配没配」，绝不能把密钥本身带出来。
+
+    这里塞一个明确的假密钥进去，然后断言它在整个响应里搜不到——
+    比「provider 是 stub」那种断言强得多：后者只是环境的快照，
+    本机配了真模型就会挂，而且它根本没在测「会不会泄漏」这件事。
+    """
+    secret = "sk-THIS-MUST-NEVER-APPEAR-0123456789"
+    runtime.set_settings(replace(
+        Settings.from_env(), llm_provider="deepseek", deepseek_api_key=secret,
+    ))
+    response = client.get("/api/health")
+    data = response.json()
+
+    assert secret not in response.text
+    assert "THIS-MUST-NEVER-APPEAR" not in response.text
+    assert data["llm"]["api_key_configured"] is True
+    # 字段集合也要钉死：以后谁多吐一个字段，这里会红
     assert set(data["llm"]) == {"provider", "model", "base_url", "api_key_configured"}
 
 
